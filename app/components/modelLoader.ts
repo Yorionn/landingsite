@@ -4,8 +4,10 @@ import type { CarouselItem } from './ThreeCarousel';
 
 /**
  * Загрузка GLB/GLTF модели для карусели
+ * @param url - Путь к GLB/GLTF файлу
+ * @param targetSize - Желаемый размер модели (по умолчанию 2.0)
  */
-export async function loadGLBModel(url: string): Promise<CarouselItem> {
+export async function loadGLBModel(url: string, targetSize: number = 2.0): Promise<CarouselItem> {
   const loader = new GLTFLoader();
   
   return new Promise((resolve, reject) => {
@@ -14,34 +16,57 @@ export async function loadGLBModel(url: string): Promise<CarouselItem> {
       (gltf) => {
         const scene = gltf.scene;
         
-        // Находим первый mesh в модели
-        let foundMesh: THREE.Mesh | undefined;
+        const meshes: THREE.Mesh[] = [];
         scene.traverse((child) => {
-          if (child instanceof THREE.Mesh && !foundMesh) {
-            foundMesh = child;
+          if (child instanceof THREE.Mesh) {
+            meshes.push(child);
           }
         });
         
-        if (!foundMesh) {
+        if (meshes.length === 0) {
           reject(new Error('No mesh found in the model'));
           return;
         }
         
-        // Масштабируем и центрируем модель
         const box = new THREE.Box3().setFromObject(scene);
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
         
         const maxDim = Math.max(size.x, size.y, size.z);
-        const scale = 0.2 / maxDim;
+        const scale = targetSize / maxDim;
         
-        scene.scale.multiplyScalar(scale);
-        scene.position.sub(center.multiplyScalar(scale));
+        const applyTransformations = (geometry: THREE.BufferGeometry) => {
+          geometry.scale(scale, scale, scale);
+          geometry.translate(-center.x * scale, -center.y * scale, -center.z * scale);
+        };
         
-        // Возвращаем клонированную геометрию и материал
+        if (meshes.length === 1) {
+          const mesh = meshes[0];
+          const geometry = mesh.geometry.clone();
+          applyTransformations(geometry);
+          
+          resolve({
+            geometry: geometry,
+            material: mesh.material
+          });
+          return;
+        }
+        
+        // Несколько мешей - создаем группу
+        const group = new THREE.Group();
+        
+        meshes.forEach(mesh => {
+          const clonedMesh = mesh.clone();
+          const geometry = clonedMesh.geometry.clone();
+          applyTransformations(geometry);
+          clonedMesh.geometry = geometry;
+          group.add(clonedMesh);
+        });
+        
         resolve({
-          geometry: foundMesh.geometry.clone(),
-          material: foundMesh.material
+          geometry: new THREE.BoxGeometry(1, 1, 1),
+          material: new THREE.MeshStandardMaterial(),
+          group: group
         });
       },
       undefined,
@@ -55,10 +80,14 @@ export async function loadGLBModel(url: string): Promise<CarouselItem> {
 
 /**
  * Загрузить массив РАЗНЫХ моделей из разных путей
- * Каждая модель будет независимой
+ * @param modelPaths - Массив путей к моделям
+ * @param targetSize - Желаемый размер моделей (по умолчанию 2.0)
  */
-export async function loadMultipleModels(modelPaths: string[]): Promise<CarouselItem[]> {
-  const loadPromises = modelPaths.map(path => loadGLBModel(path));
+export async function loadMultipleModels(
+  modelPaths: string[], 
+  targetSize: number = 2.0
+): Promise<CarouselItem[]> {
+  const loadPromises = modelPaths.map(path => loadGLBModel(path, targetSize));
   return Promise.all(loadPromises);
 }
 

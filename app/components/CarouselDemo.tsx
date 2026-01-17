@@ -13,12 +13,10 @@ export default function CarouselDemo() {
   
   // Просто добавьте/уберите пути к моделям в массиве
   const MODEL_PATHS = [
-    '/models/deer.glb',
-    '/models/deer.glb', // Временно дублируем, замените на другие модели
-    '/models/deer.glb',
-    '/models/deer.glb',
-    '/models/deer.glb',
-    '/models/deer.glb'
+    '/models/testmug.glb',
+    '/models/testmug.glb',
+    '/models/testmug.glb',
+  
   ];
   
   useEffect(() => {
@@ -119,8 +117,8 @@ export default function CarouselDemo() {
 
         <ThreeCarousel
           items={models}
-          radius={57}
-          cameraDistance={156}
+          radius={3}
+          cameraDistance={10}
           backgroundColor={0x0a0a0a}
           width="100%"
           height="800px"
