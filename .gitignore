@@ -16,6 +16,8 @@ node_modules/
 # прочее
 .DS_Store
 *.pem
+TROUBLESHOOTING.md
+CAROUSEL_MODULE.md
 
 # дебаг
 npm-debug.log*

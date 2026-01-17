@@ -1,7 +1,7 @@
 import './globalstyle.css';
 
 export const metadata = {
-  title: 'Site Nikolai',
+  title: 'carousel demo',
   description: 'Landing page',
 };
 
