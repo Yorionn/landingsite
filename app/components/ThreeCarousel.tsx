@@ -18,6 +18,8 @@ export interface ThreeCarouselProps {
   backgroundColor?: number;
   width?: string;
   height?: string;
+  rotationLocked?: boolean;
+  onIndexChange?: (index: number) => void;
 }
 
 export default function ThreeCarousel({
@@ -26,7 +28,9 @@ export default function ThreeCarousel({
   cameraDistance = 14,
   backgroundColor = 0x1a1a1a,
   width = '100%',
-  height = '600px'
+  height = '600px',
+  rotationLocked = false,
+  onIndexChange
 }: ThreeCarouselProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const activeIndexRef = useRef<number>(0);
@@ -192,8 +196,8 @@ export default function ThreeCarousel({
         }
       }
       
-      // Вращаем модель если жест rotation (центральная зона или ПК)
-      if (gestureDirection === 'rotation') {
+      // Вращаем модель если жест rotation (центральная зона или ПК) И вращение не заблокировано
+      if (gestureDirection === 'rotation' && !rotationLocked) {
         const activeModel = models[activeIndexRef.current];
         if (activeModel) {
           activeModel.rotation.y += deltaX * 0.02;
@@ -339,6 +343,9 @@ export default function ThreeCarousel({
     window.addEventListener('resize', handleResize);
 
     const changeModel = (newIndex: number) => {
+      // Проверяем, действительно ли индекс изменился
+      if (activeIndexRef.current === newIndex) return;
+      
       activeIndexRef.current = newIndex;
       
       const angleStep = (Math.PI * 2) / items.length;
@@ -348,9 +355,19 @@ export default function ThreeCarousel({
         const baseAngle = angleStep * index;
         model.userData.targetAngle = baseAngle + rotationOffset;
       });
+      
+      // Вызываем callback если он есть
+      if (onIndexChange) {
+        onIndexChange(newIndex);
+      }
     };
 
     (window as any).carouselChangeModel = changeModel;
+    
+    // Инициализируем начальный индекс
+    if (onIndexChange) {
+      onIndexChange(activeIndexRef.current);
+    }
 
     // Cleanup
     return () => {
@@ -361,7 +378,12 @@ export default function ThreeCarousel({
       renderer.dispose();
       delete (window as any).carouselChangeModel;
     };
-  }, [items, radius, cameraDistance, backgroundColor]);
+  }, [items, radius, cameraDistance, backgroundColor, onIndexChange]);
+  
+  // Отдельный эффект для синхронизации rotationLocked без пересоздания карусели
+  useEffect(() => {
+    // rotationLocked обрабатывается в обработчиках событий, не требует пересоздания
+  }, [rotationLocked]);
 
   const handleChangeModel = (direction: number) => {
     const newIndex = (activeIndexRef.current + direction + items.length) % items.length;

@@ -1,7 +1,7 @@
 'use client';
 
-import CarouselDemo from './components/CarouselDemo';
+import StageManager from './components/StageManager';
 
 export default function Home() {
-  return <CarouselDemo />;
+  return <StageManager />;
 }

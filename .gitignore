@@ -18,6 +18,7 @@ node_modules/
 *.pem
 TROUBLESHOOTING.md
 CAROUSEL_MODULE.md
+IMPLEMENTATION.md
 
 # дебаг
 npm-debug.log*
