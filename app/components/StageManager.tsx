@@ -6,7 +6,6 @@ import { loadMultipleModels } from './modelLoader';
 import type { CarouselItem } from './ThreeCarousel';
 import type { ProductData } from './types';
 import ProductInfoPanel from './ProductInfoPanel';
-import ProductCard from './ProductCard';
 
 // Тестовые данные для товаров
 const PRODUCTS_DATA: ProductData[] = [
@@ -79,23 +78,98 @@ const PRODUCTS_DATA: ProductData[] = [
 ];
 
 export default function StageManager() {
-  const [stage, setStage] = useState<1 | 2 | 3>(1);
+  const [stage, setStage] = useState<1 | 2>(1);
   const [activeIndex, setActiveIndex] = useState(0);
   const [models, setModels] = useState<CarouselItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [showPanel, setShowPanel] = useState(false);
+  const [panelState, setPanelState] = useState<'hidden' | 'visible' | 'hiding'>('hidden');
+  const [showHint, setShowHint] = useState(false);
+  const [showIntro, setShowIntro] = useState(true);
+  const [introAnimating, setIntroAnimating] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const inactivityTimerRef = useRef<NodeJS.Timeout>();
 
-  // Загрузка моделей
+  // Определение размера экрана для адаптивных параметров карусели
   useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Подсказка при бездействии
+  useEffect(() => {
+    if (stage !== 1) {
+      setShowHint(false);
+      return;
+    }
+
+    // Показываем подсказку через 5 секунд бездействия
+    const showHintTimer = setTimeout(() => {
+      setShowHint(true);
+    }, 5000);
+
+    const handleUserActivity = () => {
+      // Скрываем подсказку при активности
+      setShowHint(false);
+      // Сбрасываем таймер
+      clearTimeout(showHintTimer);
+      clearTimeout(inactivityTimerRef.current);
+      
+      // Запускаем новый таймер для повторного показа
+      inactivityTimerRef.current = setTimeout(() => {
+        setShowHint(true);
+      }, 5000);
+    };
+
+    // Отслеживаем активность пользователя (без mousemove для плавности)
+    window.addEventListener('mousedown', handleUserActivity);
+    window.addEventListener('touchstart', handleUserActivity);
+    window.addEventListener('wheel', handleUserActivity);
+
+    return () => {
+      clearTimeout(showHintTimer);
+      clearTimeout(inactivityTimerRef.current);
+      window.removeEventListener('mousedown', handleUserActivity);
+      window.removeEventListener('touchstart', handleUserActivity);
+      window.removeEventListener('wheel', handleUserActivity);
+    };
+  }, [stage]);
+
+  // Адаптивные параметры карусели
+  const carouselRadius = isMobile ? 2.5 : 4;
+  const carouselCameraDistance = isMobile ? 8 : 12;
+
+  // Загрузка моделей с отслеживанием времени
+  useEffect(() => {
+    const startTime = Date.now();
+    
     async function loadModels() {
       try {
         setLoading(true);
         const modelPaths = PRODUCTS_DATA.map(p => p.modelPath);
         const loadedModels = await loadMultipleModels(modelPaths);
         setModels(loadedModels);
-        setLoading(false);
+        
+        // Вычисляем, сколько времени прошло
+        const elapsedTime = Date.now() - startTime;
+        const minIntroTime = 2000; // Минимум 2 секунды для интро
+        
+        // Если прошло меньше 2 секунд, ждем оставшееся время
+        if (elapsedTime < minIntroTime) {
+          setTimeout(() => {
+            setLoading(false);
+          }, minIntroTime - elapsedTime);
+        } else {
+          setLoading(false);
+        }
       } catch (err) {
         console.error('Failed to load models:', err);
         setError('Failed to load 3D models');
@@ -105,36 +179,68 @@ export default function StageManager() {
     loadModels();
   }, []);
 
+  // Анимация интро после загрузки
+  useEffect(() => {
+    if (!loading && showIntro && !error) {
+      // Ждем 500ms после загрузки, затем начинаем анимацию
+      const timer = setTimeout(() => {
+        setIntroAnimating(true);
+        // Скрываем интро через 1 секунду (длительность анимации)
+        setTimeout(() => {
+          setShowIntro(false);
+        }, 1000);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [loading, showIntro, error]);
+
   // Обработка скролла для переключения этапов
   useEffect(() => {
     const element = containerRef.current;
-    if (!element || isTransitioning) return;
+    if (!element) return;
 
     let scrollTimeout: NodeJS.Timeout;
     let accumulatedDelta = 0;
     const SCROLL_THRESHOLD = 100;
 
     const handleWheel = (e: WheelEvent) => {
-      // Игнорируем горизонтальный скролл
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      if (stage === 1) {
+        // Этап 1: скролл вниз переводит на этап 2
+        if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
 
-      accumulatedDelta += e.deltaY;
+        accumulatedDelta += e.deltaY;
 
-      clearTimeout(scrollTimeout);
-      scrollTimeout = setTimeout(() => {
-        accumulatedDelta = 0;
-      }, 200);
-
-      if (Math.abs(accumulatedDelta) > SCROLL_THRESHOLD) {
-        if (accumulatedDelta > 0 && stage < 3) {
-          // Скролл вниз - следующий этап
-          e.preventDefault();
-          changeStage((stage + 1) as 1 | 2 | 3);
+        clearTimeout(scrollTimeout);
+        scrollTimeout = setTimeout(() => {
           accumulatedDelta = 0;
-        } else if (accumulatedDelta < 0 && stage > 1) {
-          // Скролл вверх - предыдущий этап
-          e.preventDefault();
-          changeStage((stage - 1) as 1 | 2 | 3);
+        }, 200);
+
+        if (Math.abs(accumulatedDelta) > SCROLL_THRESHOLD) {
+          if (accumulatedDelta > 0 && !isTransitioning) {
+            e.preventDefault();
+            changeStage(2);
+            accumulatedDelta = 0;
+          }
+        }
+      } else if (stage === 2) {
+        // Этап 2: скролл вверх в начале страницы переводит на этап 1
+        const scrollContainer = scrollContainerRef.current;
+        const isAtTop = scrollContainer ? scrollContainer.scrollTop === 0 : false;
+        
+        if (isAtTop && e.deltaY < 0) {
+          accumulatedDelta += e.deltaY;
+
+          clearTimeout(scrollTimeout);
+          scrollTimeout = setTimeout(() => {
+            accumulatedDelta = 0;
+          }, 200);
+
+          if (Math.abs(accumulatedDelta) > SCROLL_THRESHOLD && !isTransitioning) {
+            e.preventDefault();
+            changeStage(1);
+            accumulatedDelta = 0;
+          }
+        } else {
           accumulatedDelta = 0;
         }
       }
@@ -150,14 +256,16 @@ export default function StageManager() {
       const deltaY = (window as any).touchStartY - e.touches[0].clientY;
       const isVertical = Math.abs(deltaY) > 50;
 
-      if (isVertical) {
-        if (deltaY > 0 && stage < 3) {
+      if (stage === 1 && isVertical && deltaY > 0 && !isTransitioning) {
+        e.preventDefault();
+        changeStage(2);
+        delete (window as any).touchStartY;
+      } else if (stage === 2 && isVertical && deltaY < 0 && !isTransitioning) {
+        const scrollContainer = scrollContainerRef.current;
+        const isAtTop = scrollContainer ? scrollContainer.scrollTop === 0 : false;
+        if (isAtTop) {
           e.preventDefault();
-          changeStage((stage + 1) as 1 | 2 | 3);
-          delete (window as any).touchStartY;
-        } else if (deltaY < 0 && stage > 1) {
-          e.preventDefault();
-          changeStage((stage - 1) as 1 | 2 | 3);
+          changeStage(1);
           delete (window as any).touchStartY;
         }
       }
@@ -181,11 +289,28 @@ export default function StageManager() {
     };
   }, [stage, isTransitioning, models.length]);
 
-  const changeStage = (newStage: 1 | 2 | 3) => {
+  const changeStage = (newStage: 1 | 2) => {
     if (newStage === stage || isTransitioning) return;
     setIsTransitioning(true);
+    
+    if (newStage === 2) {
+      // Переход на этап 2: показываем панель, затем анимируем
+      setShowPanel(true);
+      setPanelState('hidden');
+      setTimeout(() => setPanelState('visible'), 50);
+      // Задержка перед завершением transition для плавности
+      setTimeout(() => setIsTransitioning(false), 850);
+    } else {
+      // Переход на этап 1: анимируем уход, затем скрываем
+      setPanelState('hiding');
+      setTimeout(() => {
+        setShowPanel(false);
+        setPanelState('hidden');
+        setIsTransitioning(false);
+      }, 800);
+    }
+    
     setStage(newStage);
-    setTimeout(() => setIsTransitioning(false), 600);
   };
 
   const handleChangeProduct = (direction: number) => {
@@ -193,6 +318,12 @@ export default function StageManager() {
     setActiveIndex(newIndex);
     if ((window as any).carouselChangeModel) {
       (window as any).carouselChangeModel(newIndex);
+    }
+  };
+
+  const handleLogoClick = () => {
+    if (stage !== 1) {
+      changeStage(1);
     }
   };
 
@@ -207,25 +338,7 @@ export default function StageManager() {
     };
   }, []);
 
-  if (loading) {
-    return (
-      <div style={{
-        width: '100%',
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#0a0a0a'
-      }}>
-        <div style={{ textAlign: 'center', color: 'white' }}>
-          <div style={{ fontSize: '1.2rem' }}>Loading 3D Models...</div>
-          <div style={{ fontSize: '0.9rem', color: '#888', marginTop: '0.5rem' }}>
-            Loading {PRODUCTS_DATA.length} products
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Не показываем сообщение о загрузке, только интро
 
   if (error) {
     return (
@@ -259,134 +372,253 @@ export default function StageManager() {
         position: 'relative'
       }}
     >
-      {/* Этап 1: Карусель на 90% экрана */}
+      {/* Черный фон интро */}
       <div
         style={{
-          position: 'absolute',
-          top: stage === 1 ? '0' : stage === 2 ? '-20vh' : '-50vh',
+          position: 'fixed',
+          top: 0,
           left: 0,
           width: '100%',
-          height: '90vh',
-          transition: 'all 0.8s cubic-bezier(0.4, 0, 0.2, 1)',
-          overflow: 'hidden',
-          opacity: stage === 3 ? 0 : 1,
-          pointerEvents: stage === 3 ? 'none' : 'auto',
-          zIndex: 2
+          height: '100vh',
+          backgroundColor: '#000',
+          zIndex: 9998,
+          transition: 'opacity 1s ease',
+          opacity: (showIntro && !introAnimating) ? 1 : 0,
+          pointerEvents: (showIntro && !introAnimating) ? 'auto' : 'none'
+        }}
+      />
+
+      {/* Градиент шапки */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '120px',
+          background: 'linear-gradient(to bottom, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 50%, transparent 100%)',
+          zIndex: 199,
+          transition: 'opacity 0.5s ease',
+          opacity: !showIntro ? 1 : 0,
+          pointerEvents: 'none'
+        }}
+      />
+
+      {/* Логотип DeepInside - единый элемент для интро и шапки */}
+      <div
+        onClick={handleLogoClick}
+        style={{
+          position: 'fixed',
+          top: introAnimating || !showIntro ? '30px' : '50%',
+          left: '50%',
+          transform: introAnimating || !showIntro 
+            ? 'translate(-50%, 0) scale(1)' 
+            : 'translate(-50%, -50%) scale(1)',
+          fontSize: introAnimating || !showIntro 
+            ? 'clamp(1.2rem, 3vw, 1.8rem)' 
+            : 'clamp(3rem, 10vw, 6rem)',
+          fontWeight: 'bold',
+          color: 'white',
+          fontFamily: 'Arial, sans-serif', // Здесь можно настроить шрифт
+          letterSpacing: '0.05em',
+          cursor: !showIntro ? 'pointer' : 'default',
+          transition: 'all 1s cubic-bezier(0.4, 0, 0.2, 1)',
+          zIndex: 9999,
+          pointerEvents: !showIntro ? 'auto' : 'none',
+          whiteSpace: 'nowrap'
+        }}
+        onMouseEnter={(e) => {
+          if (!showIntro) {
+            e.currentTarget.style.transform = 'translate(-50%, 0) scale(1.05)';
+            e.currentTarget.style.textShadow = '0 0 20px rgba(255,255,255,0.5)';
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!showIntro) {
+            e.currentTarget.style.transform = 'translate(-50%, 0) scale(1)';
+            e.currentTarget.style.textShadow = 'none';
+          }
         }}
       >
+        DeepInside
+      </div>
+
+      {/* Обертка для скроллируемого контента на этапе 2 */}
+      <div
+        ref={scrollContainerRef}
+        style={{
+          width: '100%',
+          height: '100vh',
+          overflowY: stage === 2 ? 'auto' : 'hidden',
+          overflowX: 'hidden'
+        }}
+      >
+        {/* Карусель - всегда в DOM для плавной анимации */}
+        <div
+          style={{
+            position: stage === 1 ? 'absolute' : 'relative',
+            top: stage === 1 ? '0' : undefined,
+            left: isMobile ? '-10%' : 0,
+            width: isMobile ? '120%' : '100%',
+            height: stage === 1 ? '90vh' : '60vh',
+            transition: 'all 0.8s cubic-bezier(0.4, 0, 0.2, 1)',
+            overflow: 'visible',
+            transform: stage === 2 ? 'translateY(-10vh) scale(0.9)' : 'translateY(-8vh) scale(1)',
+            transformOrigin: 'top center',
+            backgroundColor: '#0a0a0a'
+          }}
+        >
         <ThreeCarousel
           items={models}
-          radius={4}
-          cameraDistance={12}
+          radius={carouselRadius}
+          cameraDistance={carouselCameraDistance}
           backgroundColor={0x0a0a0a}
           width="100%"
           height="100%"
           rotationLocked={stage === 2}
           onIndexChange={setActiveIndex}
+          showUI={stage === 1}
         />
 
         {/* Всплывающие названия под активным элементом (Этап 1) */}
-        {stage === 1 && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '5%',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            textAlign: 'center',
+            color: 'white',
+            pointerEvents: 'none',
+            zIndex: 10,
+            opacity: stage === 1 ? 1 : 0,
+            transition: 'opacity 0.3s ease'
+          }}
+        >
           <div
             style={{
-              position: 'absolute',
-              bottom: '10%',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              textAlign: 'center',
-              color: 'white',
-              animation: 'fadeIn 0.5s ease-in-out',
-              pointerEvents: 'none',
-              zIndex: 10
+              fontSize: 'clamp(2rem, 5vw, 3.5rem)',
+              fontWeight: 'bold',
+              marginBottom: '0.5rem',
+              textShadow: '0 4px 12px rgba(0,0,0,0.8)',
+              letterSpacing: '0.02em'
             }}
           >
-            <div
-              style={{
-                fontSize: 'clamp(2rem, 5vw, 3.5rem)',
-                fontWeight: 'bold',
-                marginBottom: '0.5rem',
-                textShadow: '0 4px 12px rgba(0,0,0,0.8)',
-                letterSpacing: '0.02em'
-              }}
-            >
-              {currentProduct.name}
-            </div>
-            <div
-              style={{
-                fontSize: 'clamp(1rem, 2.5vw, 1.5rem)',
-                color: '#aaa',
-                fontWeight: '300',
-                textShadow: '0 2px 8px rgba(0,0,0,0.8)'
-              }}
-            >
-              {currentProduct.subtitle}
-            </div>
+            {currentProduct.name}
+          </div>
+          <div
+            style={{
+              fontSize: 'clamp(1rem, 2.5vw, 1.5rem)',
+              color: '#aaa',
+              fontWeight: '300',
+              textShadow: '0 2px 8px rgba(0,0,0,0.8)'
+            }}
+          >
+            {currentProduct.subtitle}
+          </div>
+        </div>
+        </div>
+
+        {/* Информационная панель с контролируемой анимацией */}
+        {showPanel && (
+          <div
+            style={{
+              position: panelState === 'visible' && !isTransitioning ? 'relative' : 'absolute',
+              top: panelState === 'visible' && !isTransitioning ? undefined : '50vh',
+              left: 0,
+              width: '100%',
+              marginTop: panelState === 'visible' && !isTransitioning ? '-10vh' : 0,
+              transform: panelState === 'visible' ? 'translateY(0)' : 'translateY(calc(50vh + 10vh))',
+              transition: 'transform 0.8s cubic-bezier(0.4, 0, 0.2, 1)',
+              pointerEvents: panelState === 'visible' ? 'auto' : 'none'
+            }}
+          >
+            <ProductInfoPanel
+              product={currentProduct}
+              visible={true}
+              onChangeProduct={handleChangeProduct}
+            />
           </div>
         )}
       </div>
 
-      {/* Этап 2: Информационная панель */}
-      <ProductInfoPanel
-        product={currentProduct}
-        visible={stage === 2}
-        slideOut={stage === 3}
-        onChangeProduct={handleChangeProduct}
-      />
-
-      {/* Этап 3: Полная карточка товара */}
-      {stage === 3 && (
-        <ProductCard
-          product={currentProduct}
-          onChangeProduct={handleChangeProduct}
-        />
-      )}
-
-      {/* Стрелочка для перехода вперед */}
-      {stage < 3 && (
-        <button
-          onClick={() => changeStage((stage + 1) as 1 | 2 | 3)}
-          disabled={isTransitioning}
-          style={{
-            position: 'absolute',
-            bottom: '20px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            width: '60px',
-            height: '60px',
-            borderRadius: '50%',
-            backgroundColor: 'rgba(255,255,255,0.1)',
-            border: '2px solid rgba(255,255,255,0.3)',
-            color: 'white',
-            fontSize: '24px',
-            cursor: isTransitioning ? 'not-allowed' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'all 0.3s ease',
-            zIndex: 100,
-            opacity: isTransitioning ? 0.5 : 1,
-            backdropFilter: 'blur(10px)'
-          }}
-          onMouseEnter={(e) => {
-            if (!isTransitioning) {
+      {/* Единые стрелки навигации */}
+      {!isMobile && (
+        <>
+          <button
+            onClick={() => handleChangeProduct(-1)}
+            style={{
+              position: 'fixed',
+              left: stage === 1 ? '120px' : '80px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: '50px',
+              height: '50px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(255,255,255,0.1)',
+              border: '2px solid rgba(255,255,255,0.3)',
+              color: 'white',
+              fontSize: '24px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.3s ease',
+              zIndex: 90,
+              backdropFilter: 'blur(10px)'
+            }}
+            onMouseEnter={(e) => {
               e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.2)';
-              e.currentTarget.style.transform = 'translateX(-50%) translateY(-5px)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)';
-            e.currentTarget.style.transform = 'translateX(-50%) translateY(0)';
-          }}
-        >
-          ↓
-        </button>
-      )}
+              e.currentTarget.style.transform = 'translateY(-50%) translateX(-5px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)';
+              e.currentTarget.style.transform = 'translateY(-50%) translateX(0)';
+            }}
+          >
+            ‹
+          </button>
 
+          <button
+            onClick={() => handleChangeProduct(1)}
+            style={{
+              position: 'fixed',
+              right: stage === 1 ? '120px' : '80px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: '50px',
+              height: '50px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(255,255,255,0.1)',
+              border: '2px solid rgba(255,255,255,0.3)',
+              color: 'white',
+              fontSize: '24px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.3s ease',
+              zIndex: 90,
+              backdropFilter: 'blur(10px)'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.2)';
+              e.currentTarget.style.transform = 'translateY(-50%) translateX(5px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)';
+              e.currentTarget.style.transform = 'translateY(-50%) translateX(0)';
+            }}
+          >
+            ›
+          </button>
+        </>
+      )}
 
       {/* Индикатор этапов */}
       <div
         style={{
-          position: 'absolute',
+          position: 'fixed',
           right: '30px',
           top: '50%',
           transform: 'translateY(-50%)',
@@ -396,10 +628,10 @@ export default function StageManager() {
           zIndex: 100
         }}
       >
-        {[1, 2, 3].map((s) => (
+        {[1, 2].map((s) => (
           <button
             key={s}
-            onClick={() => changeStage(s as 1 | 2 | 3)}
+            onClick={() => changeStage(s as 1 | 2)}
             disabled={isTransitioning}
             style={{
               width: '12px',
@@ -415,6 +647,33 @@ export default function StageManager() {
           />
         ))}
       </div>
+
+      {/* Подсказка при бездействии */}
+      {stage === 1 && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '80px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            color: 'white',
+            fontSize: 'clamp(0.85rem, 1.8vw, 1rem)',
+            backgroundColor: 'rgba(0,0,0,0.6)',
+            padding: '12px 24px',
+            borderRadius: '25px',
+            pointerEvents: 'none',
+            zIndex: 95,
+            opacity: showHint ? 1 : 0,
+            transition: 'opacity 1.5s ease',
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            textAlign: 'center',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          Зажмите, чтобы вращать • Свайп для смены модели • Листайте вниз
+        </div>
+      )}
 
       <style jsx>{`
         @keyframes fadeIn {
