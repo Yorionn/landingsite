@@ -13,10 +13,9 @@ export default function CarouselDemo() {
   
   // Просто добавьте/уберите пути к моделям в массиве
   const MODEL_PATHS = [
-    '/models/testmug.glb',
-    '/models/testmug.glb',
-    '/models/testmug.glb',
-  
+    '/models/V1.glb',
+    '/models/V2.glb',
+    '/models/plh.glb',
   ];
   
   useEffect(() => {
@@ -25,7 +24,7 @@ export default function CarouselDemo() {
         setLoading(true);
         
       
-        const loadedModels = await loadMultipleModels(MODEL_PATHS);
+        const loadedModels = await loadMultipleModels(MODEL_PATHS, 2.0, (path) => (path.includes('/plh.glb') ? 0.0167 : 2.0), (path) => (path.includes('/plh.glb') ? -0.35 : 0));
         
         setModels(loadedModels);
         setLoading(false);

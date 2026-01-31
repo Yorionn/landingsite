@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
 export interface CarouselItem {
   geometry: THREE.BufferGeometry;
@@ -18,6 +19,18 @@ export interface ThreeCarouselProps {
   backgroundColor?: number;
   width?: string;
   height?: string;
+  /** Масштаб активной модели (по умолчанию 0.7) */
+  activeScale?: number;
+  /** Масштаб неактивных моделей (по умолчанию 0.5) */
+  /** Изначальный поворот всех моделей по оси X (в радианах) */
+  initialRotationX?: number;
+  /** Изначальный поворот всех моделей по оси Y (в радианах) */
+  initialRotationY?: number;
+  /** Автовозврат активной модели в исходный поворот по бездействию */
+  autoResetOnIdle?: boolean;
+  /** Задержка (мс) перед автовозвратом активной модели */
+  autoResetDelayMs?: number;
+  inactiveScale?: number;
   rotationLocked?: boolean;
   onIndexChange?: (index: number) => void;
   showUI?: boolean;
@@ -25,16 +38,24 @@ export interface ThreeCarouselProps {
 
 export default function ThreeCarousel({
   items,
-  radius = 6,
+  radius = 10,
   cameraDistance = 14,
   backgroundColor = 0x1a1a1a,
   width = '100%',
   height = '600px',
+  activeScale = 1.3,
+  inactiveScale = 1.2,
+  initialRotationX = 0,
+  initialRotationY = Math.PI * 0.75,
+  autoResetOnIdle = true,
+  autoResetDelayMs = 5000,
   rotationLocked = false,
   onIndexChange,
   showUI = true
 }: ThreeCarouselProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const leftSwipeZoneRef = useRef<HTMLDivElement>(null);
+  const rightSwipeZoneRef = useRef<HTMLDivElement>(null);
   const activeIndexRef = useRef<number>(0);
   const isMobileRef = useRef<boolean>(false);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -73,10 +94,21 @@ export default function ThreeCarousel({
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     containerRef.current.appendChild(renderer.domElement);
+    // Корректный рендер PBR/текстур из glTF (иначе материалы могут выглядеть "без текстур")
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    // Совместимость с разными версиями three: свойство могло переехать/быть удалено из типов
+    (renderer as any).physicallyCorrectLights = true;
+
+    // Environment (нужно для "блеска"/отражений PBR материалов)
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    const envTexture = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+    scene.environment = envTexture;
 
     // Lights
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-    const light = new THREE.DirectionalLight(0xffffff, 0.8);
+    const light = new THREE.DirectionalLight(0xffffff, 1.2);
     light.position.set(5, 10, 5);
     scene.add(light);
 
@@ -98,6 +130,34 @@ export default function ThreeCarousel({
       model.position.x = Math.sin(angle) * radius;
       model.position.z = Math.cos(angle) * radius;
       model.position.y = 0;
+
+      const isPlaceholder = (item.name ?? '').includes('plh');
+
+      // Затемняем плейсхолдеры (без изменения прозрачности)
+      if (isPlaceholder) {
+        const makeGrayscale = (material: THREE.Material) => {
+          const mat: any = material.clone();
+          mat.onBeforeCompile = (shader: any) => {
+            shader.fragmentShader = shader.fragmentShader.replace(
+              '#include <dithering_fragment>',
+              [
+                '  // placeholder grayscale',
+                '  float luma = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));',
+                '  gl_FragColor.rgb = vec3(luma);',
+                '  #include <dithering_fragment>'
+              ].join('\n')
+            );
+          };
+          mat.needsUpdate = true;
+          return mat as THREE.Material;
+        };
+        model.traverse((child) => {
+          if (!(child instanceof THREE.Mesh)) return;
+          child.material = Array.isArray(child.material)
+            ? child.material.map((m) => makeGrayscale(m))
+            : makeGrayscale(child.material);
+        });
+      }
       
       // Включаем прозрачность для материалов
       const setOpacity = (obj: THREE.Object3D, opacity: number) => {
@@ -121,12 +181,16 @@ export default function ThreeCarousel({
       // Сохраняем начальные параметры модели
       model.userData.currentAngle = angle;
       model.userData.targetAngle = angle;
-      model.userData.currentScale = index === 0 ? 0.7 : 0.5; // Первая модель больше
-      model.userData.targetScale = index === 0 ? 0.7 : 0.5;
+      model.userData.currentScale = index === 0 ? activeScale : inactiveScale; // Первая модель больше
+      model.userData.targetScale = index === 0 ? activeScale : inactiveScale;
       
+      // Изначальный поворот модели (и точка возврата для автосброса)
+      model.rotation.x = initialRotationX;
+      model.rotation.y = initialRotationY;
+
       // Для автоматического возврата вращения в исходное положение
-      model.userData.initialRotationY = 0; // Исходное вращение по Y
-      model.userData.initialRotationX = 0; // Исходное вращение по X
+      model.userData.initialRotationY = initialRotationY; // Исходное вращение по Y
+      model.userData.initialRotationX = initialRotationX; // Исходное вращение по X
       model.userData.lastInteractionTime = Date.now(); // Время последнего взаимодействия
       model.userData.shouldResetAfterDelay = false; // Флаг для возврата после смены модели
       model.userData.resetStartTime = 0; // Время начала возврата
@@ -137,6 +201,7 @@ export default function ThreeCarousel({
 
     // Камера смотрит на центр
     camera.lookAt(0, 0, 0);
+    
     
     // Управление: мышь + touch (мобильные)
     let isDragging = false;
@@ -158,10 +223,65 @@ export default function ThreeCarousel({
     let targetRotationY = 0; // Целевое вращение по оси Y (к чему стремится модель)
     let targetRotationX = 0; // Целевое вращение по оси X (к чему стремится модель)
     let lastRotationTime = 0; // Время последнего кадра вращения
+
+    // Если пользователь ещё не делал drag, targetRotationX/Y остаются 0.
+    // Это может вызвать "дёргание" к (0,0) перед автосбросом в initialRotation.
+    const initialActiveModel = models[activeIndexRef.current];
+    if (initialActiveModel) {
+      targetRotationY = initialActiveModel.rotation.y;
+      targetRotationX = initialActiveModel.rotation.x;
+    }
     
     const canvas = renderer.domElement;
     canvas.style.cursor = 'grab';
-    canvas.style.touchAction = 'pan-y';
+   
+    // Разрешаем вертикальный пан и манипуляции браузера (включая pull-to-refresh)
+    canvas.style.touchAction = 'pan-y manipulation';
+    // Важно: канвас добавляется в DOM ПОСЛЕ React-элементов контейнера,
+    // поэтому фиксируем слои через z-index, чтобы "зоны свайпа" были сверху.
+    // НЕ делаем canvas absolute, чтобы он не влиял на расчёт размеров контейнера.
+    canvas.style.position = 'relative';
+    canvas.style.zIndex = '0';
+
+    const swipeZones = [leftSwipeZoneRef.current, rightSwipeZoneRef.current].filter(Boolean) as HTMLDivElement[];
+
+    const onZoneTouchStart = (e: TouchEvent) => {
+      if (e.touches.length > 0) {
+        onDragStart(e.touches[0].clientX, e.touches[0].clientY);
+        
+        // В боковых зонах приоритет — свайп карусели: отключаем pull-to-refresh
+        // и сразу переводим жест в режим horizontal.
+        allowPullToRefresh = false;
+        gestureDirection = 'horizontal';
+
+        // Блокируем системные жесты.
+        e.preventDefault();
+      }
+    };
+
+    const onZoneTouchMove = (e: TouchEvent) => {
+      if (e.touches.length > 0) {
+        onDragMove(e.touches[0].clientX, e.touches[0].clientY);
+        // Если уже определили горизонтальный жест — не даём странице скроллиться.
+        if (gestureDirection === 'horizontal') {
+          e.preventDefault();
+        }
+      }
+    };
+
+    const onZoneTouchEnd = (e: TouchEvent) => {
+      if (e.changedTouches.length > 0) {
+        onDragEnd(e.changedTouches[0].clientX, e.changedTouches[0].clientY, false);
+      } else {
+        onDragEnd(0, 0, true);
+      }
+    };
+
+    swipeZones.forEach((zone) => {
+      zone.addEventListener('touchstart', onZoneTouchStart, { passive: false });
+      zone.addEventListener('touchmove', onZoneTouchMove, { passive: false });
+      zone.addEventListener('touchend', onZoneTouchEnd, { passive: false });
+    });
     
     // Переменная для хранения последних координат (для touchend)
     let lastX = 0;
@@ -176,11 +296,16 @@ export default function ThreeCarousel({
       };
     };
     
+    // Переменная для отслеживания возможности pull-to-refresh
+    let allowPullToRefresh = false;
+    
     // Универсальные функции для мыши и touch
     const onDragStart = (clientX: number, clientY: number) => {
       const coords = getCanvasRelativeCoords(clientX, clientY);
       const x = coords.x;
       const y = coords.y;
+      // По умолчанию считаем, что вращение НЕ идёт (станет true, когда реально начнём canRotate)
+      (window as any).carouselIsRotating = false;
       
       isDragging = true;
       previousX = x;
@@ -194,6 +319,15 @@ export default function ThreeCarousel({
       shouldPreventDefault = false;
       hasRotated = false; // Сбрасываем флаг вращения
       
+      // Проверяем возможность pull-to-refresh (только на мобильных)
+      // Разрешаем, если страница находится в самом верху
+      if (isMobileRef.current) {
+        const isAtTop = window.scrollY === 0 || window.pageYOffset === 0;
+        allowPullToRefresh = isAtTop;
+      } else {
+        allowPullToRefresh = false;
+      }
+      
       // Сбрасываем инерцию вращения при начале нового жеста
       rotationVelocityY = 0;
       rotationVelocityX = 0;
@@ -205,11 +339,17 @@ export default function ThreeCarousel({
         targetRotationX = activeModel.rotation.x;
       }
       
+      
       canvas.style.cursor = 'grabbing';
       
       // Определяем зону начала жеста (для мобильных И ПК)
       const canvasWidth = canvas.clientWidth;
       const edgeZoneWidth = canvasWidth * 0.2; // 20% с каждой стороны
+      
+      // В edge-зонах pull-to-refresh и вертикальные эвристики мешают распознаванию свайпа
+      if (isEdgeZone) {
+        allowPullToRefresh = false;
+      }
       
       isEdgeZone = x < edgeZoneWidth || x > canvasWidth - edgeZoneWidth;
       isCenterZone = !isEdgeZone;
@@ -235,6 +375,19 @@ export default function ThreeCarousel({
       
       // ===== УНИВЕРСАЛЬНАЯ ЛОГИКА (мобила и ПК) =====
       
+      // ПРИОРИТЕТ: Разрешаем pull-to-refresh на мобильных
+      // Если пользователь тянет вниз от верха страницы (deltaY > 0 = движение вниз по экрану)
+      if (isMobileRef.current && allowPullToRefresh && !hasRotated) {
+        const pullDownDistance = y - startY;
+        // Если движение вниз больше 10px - это явное намерение обновить страницу
+        if (pullDownDistance > 10) {
+          // Не блокируем событие, разрешаем браузеру обработать pull-to-refresh
+          shouldPreventDefault = false;
+          gestureDirection = 'vertical';
+          return;
+        }
+      }
+      
       // Проверяем явное вертикальное намерение для скролла (только мобильные в центре)
       if (isMobileRef.current && isCenterZone && gestureDirection === 'rotation' && !hasRotated) {
         totalDeltaY += Math.abs(deltaY);
@@ -246,8 +399,18 @@ export default function ThreeCarousel({
           shouldPreventDefault = false;
           return;
         }
-      }
       
+      
+        // Если в центре начали явный горизонтальный жест — считаем это свайпом карусели
+        // (иначе на мобильных часто "не попадаешь" в edge-зону 20%)
+        const horizontalDominant = totalDeltaX > 30 && totalDeltaX > totalDeltaY * 1.3;
+        if (horizontalDominant) {
+          gestureDirection = 'horizontal';
+          shouldPreventDefault = true;
+          return;
+        }
+      }
+
       // Вращаем модель ТОЛЬКО если:
       // 1. Жест НЕ в краевой зоне свайпа (или уже начали вращать из центра)
       // 2. Вращение не заблокировано
@@ -281,6 +444,9 @@ export default function ThreeCarousel({
           activeModel.userData.shouldResetAfterDelay = false; // Отменяем возврат если вращаем
           
           hasRotated = true; // Устанавливаем флаг - начали вращать
+          (window as any).carouselIsRotating = true;
+          // Отключаем pull-to-refresh если начали вращать модель
+          allowPullToRefresh = false;
           
           if (isMobileRef.current) {
             shouldPreventDefault = true;
@@ -318,9 +484,10 @@ export default function ThreeCarousel({
       // 3. Движение было достаточно горизонтальным и длинным
       
       const isHorizontalDominant = Math.abs(deltaX) > Math.abs(deltaY) * 1.3;
-      const isSignificantDistance = Math.abs(deltaX) > 30; // Минимальная дистанция для свайпа
+      const minSwipeDistance = isMobileRef.current ? 20 : 30; // На мобилках короче свайп
+      const isSignificantDistance = Math.abs(deltaX) > minSwipeDistance;
       
-      const shouldSwipe = isEdgeZone 
+      const shouldSwipe = (isEdgeZone || isMobileRef.current) 
         && !hasRotated 
         && gestureDirection === 'horizontal' 
         && isHorizontalDominant 
@@ -338,6 +505,7 @@ export default function ThreeCarousel({
       gestureDirection = 'rotation';
       shouldPreventDefault = false;
       hasRotated = false; // Сбрасываем флаг вращения
+      (window as any).carouselIsRotating = false;
       canvas.style.cursor = 'grab';
     };
     
@@ -362,21 +530,36 @@ export default function ThreeCarousel({
     canvas.addEventListener('touchstart', (e: TouchEvent) => {
       if (e.touches.length > 0) {
         onDragStart(e.touches[0].clientX, e.touches[0].clientY);
+        // Для свайпа (edge-зоны) на мобильных сразу блокируем системные жесты браузера
+        // (например back/forward swipe) и возможный скролл.
+        if (isMobileRef.current && isEdgeZone) {
+          e.preventDefault();
+        }
       }
     }, { passive: false });
     
     canvas.addEventListener('touchmove', (e: TouchEvent) => {
       if (e.touches.length > 0) {
         onDragMove(e.touches[0].clientX, e.touches[0].clientY);
-        if (shouldPreventDefault && gestureDirection !== 'vertical') {
+        // Блокируем событие если:
+        // 1) началось вращение модели (shouldPreventDefault = true)
+        // 2) ИЛИ это горизонтальный свайп в edge-зоне
+        // При этом не мешаем pull-to-refresh и явному вертикальному скроллу.
+        const isSwipeGesture = gestureDirection === 'horizontal' && isEdgeZone;
+        if ((shouldPreventDefault || isSwipeGesture) && gestureDirection !== 'vertical' && !allowPullToRefresh) {
           e.preventDefault();
         }
       }
     }, { passive: false });
     
     canvas.addEventListener('touchend', (e: TouchEvent) => {
-      // Используем флаг isTouch для touchend, чтобы использовать lastX/lastY
-      onDragEnd(0, 0, true);
+      // На быстрых свайпах touchmove может не успеть отработать,
+      // поэтому для стабильности берём координаты из changedTouches.
+      if (e.changedTouches.length > 0) {
+        onDragEnd(e.changedTouches[0].clientX, e.changedTouches[0].clientY, false);
+      } else {
+        onDragEnd(0, 0, true);
+      }
     }, { passive: false });
 
     setIsLoaded(true);
@@ -424,7 +607,7 @@ export default function ThreeCarousel({
           // Проверяем автоматический возврат в исходное положение
           // Если прошло 5 секунд без взаимодействия
           const timeSinceInteraction = Date.now() - activeModel.userData.lastInteractionTime;
-          const shouldAutoReset = timeSinceInteraction > 5000;
+          const shouldAutoReset = autoResetOnIdle && timeSinceInteraction > autoResetDelayMs;
           
           if (shouldAutoReset) {
             const initialY = activeModel.userData.initialRotationY;
@@ -503,7 +686,7 @@ export default function ThreeCarousel({
         model.position.z = Math.cos(model.userData.currentAngle) * radius;
         
         // Плавное изменение размера (замедлено с 0.05 до 0.03)
-        model.userData.targetScale = isActive ? 0.7 : 0.5;
+        model.userData.targetScale = isActive ? activeScale : inactiveScale;
         const scaleDiff = model.userData.targetScale - model.userData.currentScale;
         model.userData.currentScale += scaleDiff * 0.03; // Замедлено
         model.scale.setScalar(model.userData.currentScale);
@@ -603,10 +786,18 @@ export default function ThreeCarousel({
     // Cleanup
     return () => {
       window.removeEventListener('resize', handleResize);
+      swipeZones.forEach((zone) => {
+        zone.removeEventListener('touchstart', onZoneTouchStart as any);
+        zone.removeEventListener('touchmove', onZoneTouchMove as any);
+        zone.removeEventListener('touchend', onZoneTouchEnd as any);
+      });
       if (containerRef.current && renderer.domElement) {
         containerRef.current.removeChild(renderer.domElement);
       }
       renderer.dispose();
+      pmremGenerator.dispose();
+      envTexture.dispose();
+      (window as any).carouselIsRotating = false;
       delete (window as any).carouselChangeModel;
     };
   }, [items, radius, cameraDistance, backgroundColor, onIndexChange]);
@@ -633,6 +824,33 @@ export default function ThreeCarousel({
         userSelect: 'none'
       }}
     >
+      {/* Зоны свайпа поверх канваса (стабильнее на мобильных) */}
+      <div
+        ref={leftSwipeZoneRef}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: '18%',
+          zIndex: 2,
+          pointerEvents: isMobile ? 'auto' : 'none',
+          touchAction: 'pan-y'
+        }}
+      />
+      <div
+        ref={rightSwipeZoneRef}
+        style={{
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          bottom: 0,
+          width: '18%',
+          zIndex: 2,
+          pointerEvents: isMobile ? 'auto' : 'none',
+          touchAction: 'pan-y'
+        }}
+      />  
       {!isLoaded && (
         <div style={{
           position: 'absolute',

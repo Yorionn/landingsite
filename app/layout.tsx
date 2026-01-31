@@ -1,7 +1,7 @@
 import './globalstyle.css';
 
 export const metadata = {
-  title: 'carousel demo',
+  title: 'DeepInside',
   description: 'Landing page',
 };
 

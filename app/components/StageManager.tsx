@@ -7,73 +7,55 @@ import type { CarouselItem } from './ThreeCarousel';
 import type { ProductData } from './types';
 import ProductInfoPanel from './ProductInfoPanel';
 
-// Тестовые данные для товаров
+// ПРИВЯЗКА ИНФОРМАЦИИ К МОДЕЛЯМ ТОВАРОВ
 const PRODUCTS_DATA: ProductData[] = [
   {
     id: '1',
-    name: 'Premium Ceramic Mug',
-    subtitle: 'Handcrafted excellence',
-    price: '$24.99',
-    description: 'Experience the perfect blend of form and function with our Premium Ceramic Mug. Crafted from high-quality ceramic, this mug is designed to keep your beverages at the ideal temperature while adding a touch of elegance to your daily routine.',
+    name: 'Model A',
+    subtitle: 'Iphone 17 Pro Max Case',
+    price: 'RUB 5000',
+    description: 'Experience the perfect blend of form and function with our Iphone 17 Pro Max Case. Crafted from high-quality metal, this case is designed to keep your phone at the ideal temperature while adding a touch of elegance to your daily routine.',
     features: [
-      'High-quality ceramic construction',
-      'Ergonomic handle design',
-      'Dishwasher and microwave safe',
-      'Capacity: 350ml',
-      'Heat-resistant coating'
+      'High-quality metal construction',
+      'Ergonomic design',
     ],
     specifications: [
-      { label: 'Material', value: 'Premium Ceramic' },
-      { label: 'Capacity', value: '350ml / 12oz' },
+      { label: 'Material', value: 'Premium Metal' },
       { label: 'Dimensions', value: '10cm x 8cm' },
       { label: 'Weight', value: '320g' },
-      { label: 'Care', value: 'Dishwasher safe' }
     ],
-    modelPath: '/models/testmug.glb'
+    modelPath: '/models/V1.glb'
   },
   {
     id: '2',
-    name: 'Classic Ceramic Mug',
-    subtitle: 'Timeless design',
-    price: '$19.99',
-    description: 'A classic design that never goes out of style. Perfect for your morning coffee or evening tea, this mug combines durability with aesthetic appeal.',
+    name: 'Model B',
+    subtitle: 'Iphone 17 Pro Max Case',
+    price: 'RUB 5000',
+    description: 'Experience the perfect blend of form and function with our Iphone 17 Pro Max Case. Crafted from high-quality metal, this case is designed to keep your phone at the ideal temperature while adding a touch of elegance to your daily routine.',
     features: [
-      'Traditional ceramic craftsmanship',
-      'Comfortable grip handle',
-      'Easy to clean',
-      'Capacity: 300ml',
-      'Versatile use'
+      'High-quality metal construction',
+      'Ergonomic design',
     ],
     specifications: [
-      { label: 'Material', value: 'Ceramic' },
-      { label: 'Capacity', value: '300ml / 10oz' },
+      { label: 'Material', value: 'Premium Metal' },
       { label: 'Dimensions', value: '9cm x 7.5cm' },
       { label: 'Weight', value: '280g' },
-      { label: 'Care', value: 'Hand wash recommended' }
     ],
-    modelPath: '/models/testmug.glb'
+    modelPath: '/models/V2.glb'
   },
   {
-    id: '3',
-    name: 'Modern Ceramic Mug',
-    subtitle: 'Contemporary style',
-    price: '$22.99',
-    description: 'Embrace modern minimalism with this sleek ceramic mug. Its contemporary design makes it a perfect addition to any modern kitchen or office space.',
+    id: '4',
+    name: 'Soon',
+    subtitle: 'Soon',
+    price: 'RUB 5000',
+    description: 'Soon',
     features: [
-      'Minimalist design',
-      'Sturdy construction',
-      'Heat retention technology',
-      'Capacity: 320ml',
-      'Scratch-resistant surface'
+      'Soon',
     ],
     specifications: [
-      { label: 'Material', value: 'Advanced Ceramic' },
-      { label: 'Capacity', value: '320ml / 11oz' },
-      { label: 'Dimensions', value: '9.5cm x 8cm' },
-      { label: 'Weight', value: '300g' },
-      { label: 'Care', value: 'Dishwasher safe' }
+      { label: 'Material', value: 'Soon' },
     ],
-    modelPath: '/models/testmug.glb'
+    modelPath: '/models/plh.glb'
   }
 ];
 
@@ -155,7 +137,13 @@ export default function StageManager() {
       try {
         setLoading(true);
         const modelPaths = PRODUCTS_DATA.map(p => p.modelPath);
-        const loadedModels = await loadMultipleModels(modelPaths);
+        const loadedModels = await loadMultipleModels(
+          modelPaths,
+          2.0,
+          (path) => (path.includes('/plh.glb') ? 0.0167 : 2.0),
+          (path) => (path.includes('/plh.glb') ? -0.35 : 0)
+        );
+
         setModels(loadedModels);
         
         // Вычисляем, сколько времени прошло
@@ -248,18 +236,31 @@ export default function StageManager() {
 
     const handleTouchStart = (e: TouchEvent) => {
       (window as any).touchStartY = e.touches[0].clientY;
+      (window as any).touchStartScrollY = window.scrollY || window.pageYOffset;
     };
 
     const handleTouchMove = (e: TouchEvent) => {
       if (!(window as any).touchStartY) return;
 
+      // Пока пользователь вращает активную модель в карусели, не переводим на этап 2 (мобилки).
+      if (isMobile && stage === 1 && (window as any).carouselIsRotating) {
+        return;
+      }
       const deltaY = (window as any).touchStartY - e.touches[0].clientY;
       const isVertical = Math.abs(deltaY) > 50;
+      const startScrollY = (window as any).touchStartScrollY || 0;
 
       if (stage === 1 && isVertical && deltaY > 0 && !isTransitioning) {
-        e.preventDefault();
-        changeStage(2);
-        delete (window as any).touchStartY;
+        // Проверяем, не пытается ли пользователь сделать pull-to-refresh
+        // Pull-to-refresh: deltaY < 0 (тянет вниз) И находится в самом верху
+        const isPullToRefresh = startScrollY === 0 && deltaY < 0;
+        
+        if (!isPullToRefresh) {
+          e.preventDefault();
+          changeStage(2);
+          delete (window as any).touchStartY;
+          delete (window as any).touchStartScrollY;
+        }
       } else if (stage === 2 && isVertical && deltaY < 0 && !isTransitioning) {
         const scrollContainer = scrollContainerRef.current;
         const isAtTop = scrollContainer ? scrollContainer.scrollTop === 0 : false;
@@ -267,12 +268,14 @@ export default function StageManager() {
           e.preventDefault();
           changeStage(1);
           delete (window as any).touchStartY;
+          delete (window as any).touchStartScrollY;
         }
       }
     };
 
     const handleTouchEnd = () => {
       delete (window as any).touchStartY;
+      delete (window as any).touchStartScrollY;
     };
 
     element.addEventListener('wheel', handleWheel, { passive: false });
@@ -458,8 +461,8 @@ export default function StageManager() {
           style={{
             position: stage === 1 ? 'absolute' : 'relative',
             top: stage === 1 ? '0' : undefined,
-            left: isMobile ? '-10%' : 0,
-            width: isMobile ? '120%' : '100%',
+            left: 0,
+            width: '100%',
             height: stage === 1 ? '90vh' : '60vh',
             transition: 'all 0.8s cubic-bezier(0.4, 0, 0.2, 1)',
             overflow: 'visible',
@@ -484,9 +487,9 @@ export default function StageManager() {
         <div
           style={{
             position: 'absolute',
-            bottom: '5%',
-            left: '50%',
-            transform: 'translateX(-50%)',
+            bottom: '1%',
+            left: '10%',
+            right: '10%',
             textAlign: 'center',
             color: 'white',
             pointerEvents: 'none',
@@ -500,7 +503,7 @@ export default function StageManager() {
               fontSize: 'clamp(2rem, 5vw, 3.5rem)',
               fontWeight: 'bold',
               marginBottom: '0.5rem',
-              textShadow: '0 4px 12px rgba(0,0,0,0.8)',
+              textShadow: '0 4px 12px rgba(0, 0, 0, 0.8)',
               letterSpacing: '0.02em'
             }}
           >
@@ -671,7 +674,7 @@ export default function StageManager() {
             whiteSpace: 'nowrap'
           }}
         >
-          Зажмите, чтобы вращать • Свайп для смены модели • Листайте вниз
+          Зажмите, чтобы вращать
         </div>
       )}
 

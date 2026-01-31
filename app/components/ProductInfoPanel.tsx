@@ -27,7 +27,7 @@ export default function ProductInfoPanel({ product, visible, onChangeProduct }: 
       content: 'Третья вкладка с информацией о доставке. Описание условий доставки, сроков, стоимости и доступных регионов для отправки товара.'
     }
   ];
-
+  // ЦВЕТ ВЫЕЗЖАЮЩЕЙ ПЛАШКИ
   return (
     <div
       ref={panelRef}
@@ -35,7 +35,7 @@ export default function ProductInfoPanel({ product, visible, onChangeProduct }: 
         position: 'relative',
         width: '100%',
         minHeight: '60vh',
-        backgroundColor: '#1a1a1a',
+        backgroundColor: 'rgba(26, 26, 26, 0)',
         display: visible ? 'flex' : 'none',
         flexDirection: 'column'
       }}
@@ -91,8 +91,8 @@ export default function ProductInfoPanel({ product, visible, onChangeProduct }: 
               style={{
                 fontSize: 'clamp(1.5rem, 3.5vw, 2.5rem)',
                 fontWeight: 'bold',
-                color: '#4CAF50',
-                textShadow: '0 0 20px rgba(76, 175, 80, 0.3)'
+                color: '#f6f6f6',
+                textShadow: '0 0 18px rgba(246, 246, 246, 0.25)'
               }}
             >
               {product.price}
