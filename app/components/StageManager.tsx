@@ -24,7 +24,7 @@ const PRODUCTS_DATA: ProductData[] = [
       { label: 'Dimensions', value: '10cm x 8cm' },
       { label: 'Weight', value: '320g' },
     ],
-    modelPath: '/models/V1.glb'
+    modelPath: '/models/VV1.glb'
   },
   {
     id: '2',
@@ -41,10 +41,10 @@ const PRODUCTS_DATA: ProductData[] = [
       { label: 'Dimensions', value: '9cm x 7.5cm' },
       { label: 'Weight', value: '280g' },
     ],
-    modelPath: '/models/V2.glb'
+    modelPath: '/models/VV2.glb'
   },
   {
-    id: '4',
+    id: '3',
     name: 'Soon',
     subtitle: 'Soon',
     price: 'RUB 5000',
